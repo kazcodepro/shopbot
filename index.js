@@ -83,6 +83,10 @@ client.on('messageCreate', async (message) => {
                 await handleTicketCreate(message);
                 break;
             
+            case 'ticket-panel':
+                await handleTicketPanel(message);
+                break;
+            
             case 'close':
             case 'close-ticket':
                 await handleTicketClose(message);
@@ -127,7 +131,41 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Help command
+// NEW: Ticket Panel Command
+async function handleTicketPanel(message) {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return message.reply('❌ You need Administrator permissions to use this command.');
+    }
+
+    const settings = serverSettings.get(message.guild.id);
+    if (!settings || !settings.ticketCategory) {
+        return message.reply('❌ Ticket system is not set up. Use `+setup-tickets #category @role` first.');
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle('🎫 Ticket Tool')
+        .setDescription('**Partner**\n\nPour envisager un partenariat veuillez créer un ticket !\n\n🎫 **TicketTool.xyz** - Ticketing without clutter')
+        .setColor('#5865F2') // Discord blurple color
+        .setTimestamp();
+
+    const button = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId('create_ticket_panel')
+                .setLabel('📩 Create ticket')
+                .setStyle(ButtonStyle.Primary)
+        );
+
+    await message.channel.send({
+        embeds: [embed],
+        components: [button]
+    });
+
+    // Delete the command message for cleaner look
+    await message.delete().catch(() => {});
+}
+
+// Help command (updated to include ticket-panel)
 async function handleHelp(message) {
     const embed = new EmbedBuilder()
         .setTitle('🤖 Bot Commands')
@@ -136,7 +174,7 @@ async function handleHelp(message) {
         .addFields(
             { 
                 name: '🎫 Ticket System', 
-                value: `\`${PREFIX}ticket\` - Create a support ticket\n\`${PREFIX}close\` - Close current ticket\n\`${PREFIX}setup-tickets #category @role\` - Setup ticket system`, 
+                value: `\`${PREFIX}ticket\` - Create a support ticket\n\`${PREFIX}ticket-panel\` - Create ticket panel with button\n\`${PREFIX}close\` - Close current ticket\n\`${PREFIX}setup-tickets #category @role\` - Setup ticket system`, 
                 inline: false 
             },
             { 
@@ -185,21 +223,36 @@ async function handleTicketCreate(message) {
         return message.reply('❌ Ticket system is not set up. Use `+setup-tickets #category @role` first.');
     }
 
+    await createTicketForUser(message.author, message.guild, message.channel, settings);
+}
+
+// UPDATED: Create ticket function (reusable for both command and button)
+async function createTicketForUser(user, guild, responseChannel, settings) {
+    // Check if user already has an open ticket
+    const existingTicket = Array.from(ticketData.values()).find(
+        ticket => ticket.creator === user.id && guild.channels.cache.has(ticket.channelId)
+    );
+    
+    if (existingTicket) {
+        const ticketChannel = guild.channels.cache.get(existingTicket.channelId);
+        return responseChannel.send(`❌ You already have an open ticket: ${ticketChannel}`);
+    }
+
     const ticketNumber = Math.floor(Math.random() * 9000) + 1000;
     const channelName = `ticket-${ticketNumber}`;
 
     try {
-        const ticketChannel = await message.guild.channels.create({
+        const ticketChannel = await guild.channels.create({
             name: channelName,
             type: ChannelType.GuildText,
             parent: settings.ticketCategory,
             permissionOverwrites: [
                 {
-                    id: message.guild.id,
+                    id: guild.id,
                     deny: [PermissionFlagsBits.ViewChannel]
                 },
                 {
-                    id: message.author.id,
+                    id: user.id,
                     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
                 },
                 {
@@ -210,9 +263,10 @@ async function handleTicketCreate(message) {
         });
 
         ticketData.set(ticketChannel.id, {
-            creator: message.author.id,
+            creator: user.id,
             createdAt: new Date(),
-            ticketNumber
+            ticketNumber,
+            channelId: ticketChannel.id
         });
 
         const embed = new EmbedBuilder()
@@ -220,7 +274,7 @@ async function handleTicketCreate(message) {
             .setDescription('Support team will be with you shortly!')
             .setColor('#0099ff')
             .addFields(
-                { name: 'Created by', value: `${message.author}`, inline: true },
+                { name: 'Created by', value: `${user}`, inline: true },
                 { name: 'Status', value: '🟢 Open', inline: true }
             )
             .setTimestamp();
@@ -235,16 +289,16 @@ async function handleTicketCreate(message) {
             );
 
         await ticketChannel.send({
-            content: `${message.author} <@&${settings.supportRole}>`,
+            content: `${user} <@&${settings.supportRole}>`,
             embeds: [embed],
             components: [closeButton]
         });
 
-        await message.reply(`✅ Ticket created! ${ticketChannel}`);
+        await responseChannel.send(`✅ Ticket created! ${ticketChannel}`);
 
     } catch (error) {
         console.error('Ticket creation error:', error);
-        await message.reply('❌ Failed to create ticket. Please try again.');
+        await responseChannel.send('❌ Failed to create ticket. Please try again.');
     }
 }
 
@@ -272,9 +326,43 @@ async function handleTicketClose(message) {
     }, 10000);
 }
 
-// Button interaction handler
+// UPDATED: Button interaction handler
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
+
+    if (interaction.customId === 'create_ticket_panel') {
+        const settings = serverSettings.get(interaction.guild.id);
+        if (!settings || !settings.ticketCategory) {
+            return interaction.reply({
+                content: '❌ Ticket system is not set up properly.',
+                ephemeral: true
+            });
+        }
+
+        // Check if user already has an open ticket
+        const existingTicket = Array.from(ticketData.values()).find(
+            ticket => ticket.creator === interaction.user.id && 
+            interaction.guild.channels.cache.has(ticket.channelId)
+        );
+        
+        if (existingTicket) {
+            const ticketChannel = interaction.guild.channels.cache.get(existingTicket.channelId);
+            return interaction.reply({
+                content: `❌ You already have an open ticket: ${ticketChannel}`,
+                ephemeral: true
+            });
+        }
+
+        // Defer the reply to give us more time
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+            await createTicketForUser(interaction.user, interaction.guild, interaction, settings);
+        } catch (error) {
+            console.error('Ticket creation error from button:', error);
+            await interaction.editReply('❌ Failed to create ticket. Please try again.');
+        }
+    }
 
     if (interaction.customId === 'close_ticket') {
         const ticket = ticketData.get(interaction.channel.id);
