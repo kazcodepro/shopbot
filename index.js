@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
 const express = require('express');
 const cron = require('node-cron');
 
@@ -30,106 +30,17 @@ const client = new Client({
     ]
 });
 
+// Bot settings
+const PREFIX = '+';
+
 // In-memory storage (use database in production)
 const ticketData = new Map();
 const serverSettings = new Map();
 
-// Slash commands
-const commands = [
-    new SlashCommandBuilder()
-        .setName('ticket')
-        .setDescription('Create a support ticket'),
-    
-    new SlashCommandBuilder()
-        .setName('close-ticket')
-        .setDescription('Close the current ticket'),
-    
-    new SlashCommandBuilder()
-        .setName('setup-welcome')
-        .setDescription('Setup welcome system')
-        .addChannelOption(option =>
-            option.setName('channel')
-                .setDescription('Welcome channel')
-                .setRequired(true)),
-    
-    new SlashCommandBuilder()
-        .setName('setup-tickets')
-        .setDescription('Setup ticket system')
-        .addChannelOption(option =>
-            option.setName('category')
-                .setDescription('Ticket category')
-                .setRequired(true))
-        .addRoleOption(option =>
-            option.setName('support-role')
-                .setDescription('Support team role')
-                .setRequired(true)),
-    
-    new SlashCommandBuilder()
-        .setName('userinfo')
-        .setDescription('Get user information')
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('User to get info about')),
-    
-    new SlashCommandBuilder()
-        .setName('serverinfo')
-        .setDescription('Get server information'),
-    
-    new SlashCommandBuilder()
-        .setName('kick')
-        .setDescription('Kick a user')
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('User to kick')
-                .setRequired(true))
-        .addStringOption(option =>
-            option.setName('reason')
-                .setDescription('Reason for kick')),
-    
-    new SlashCommandBuilder()
-        .setName('ban')
-        .setDescription('Ban a user')
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('User to ban')
-                .setRequired(true))
-        .addStringOption(option =>
-            option.setName('reason')
-                .setDescription('Reason for ban')),
-    
-    new SlashCommandBuilder()
-        .setName('purge')
-        .setDescription('Delete messages')
-        .addIntegerOption(option =>
-            option.setName('amount')
-                .setDescription('Number of messages to delete (1-100)')
-                .setRequired(true)
-                .setMinValue(1)
-                .setMaxValue(100))
-];
-
-// Register slash commands
-async function registerCommands() {
-    try {
-        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-        console.log('Started refreshing application (/) commands.');
-        
-        await rest.put(
-            Routes.applicationCommands(process.env.CLIENT_ID),
-            { body: commands }
-        );
-        
-        console.log('Successfully reloaded application (/) commands.');
-    } catch (error) {
-        console.error(error);
-    }
-}
-
 // Bot ready event
-client.once('ready', async () => {
+client.once('ready', () => {
     console.log(`🤖 ${client.user.tag} is online!`);
-    client.user.setActivity('Helping users | /ticket', { type: 'WATCHING' });
-    await registerCommands();
+    client.user.setActivity(`${PREFIX}help | Helping users`, { type: 'WATCHING' });
 });
 
 // Welcome system
@@ -155,84 +66,140 @@ client.on('guildMemberAdd', async (member) => {
     channel.send({ embeds: [welcomeEmbed] });
 });
 
-// Slash command handler
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
+// Message command handler
+client.on('messageCreate', async (message) => {
+    if (message.author.bot || !message.content.startsWith(PREFIX)) return;
 
-    const { commandName, guild, member, channel } = interaction;
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
 
     try {
-        switch (commandName) {
-            case 'ticket':
-                await handleTicketCreate(interaction);
+        switch (command) {
+            case 'help':
+                await handleHelp(message);
                 break;
             
+            case 'ticket':
+                await handleTicketCreate(message);
+                break;
+            
+            case 'close':
             case 'close-ticket':
-                await handleTicketClose(interaction);
+                await handleTicketClose(message);
                 break;
             
             case 'setup-welcome':
-                await handleWelcomeSetup(interaction);
+                await handleWelcomeSetup(message, args);
                 break;
             
             case 'setup-tickets':
-                await handleTicketSetup(interaction);
+                await handleTicketSetup(message, args);
                 break;
             
             case 'userinfo':
-                await handleUserInfo(interaction);
+                await handleUserInfo(message, args);
                 break;
             
             case 'serverinfo':
-                await handleServerInfo(interaction);
+                await handleServerInfo(message);
                 break;
             
             case 'kick':
-                await handleKick(interaction);
+                await handleKick(message, args);
                 break;
             
             case 'ban':
-                await handleBan(interaction);
+                await handleBan(message, args);
                 break;
             
             case 'purge':
-                await handlePurge(interaction);
+            case 'clear':
+                await handlePurge(message, args);
+                break;
+            
+            case 'ping':
+                await handlePing(message);
                 break;
         }
     } catch (error) {
         console.error('Command error:', error);
-        await interaction.reply({
-            content: 'An error occurred while executing the command.',
-            ephemeral: true
-        });
+        await message.reply('❌ An error occurred while executing the command.');
     }
 });
 
+// Help command
+async function handleHelp(message) {
+    const embed = new EmbedBuilder()
+        .setTitle('🤖 Bot Commands')
+        .setDescription(`Prefix: \`${PREFIX}\``)
+        .setColor('#0099ff')
+        .addFields(
+            { 
+                name: '🎫 Ticket System', 
+                value: `\`${PREFIX}ticket\` - Create a support ticket\n\`${PREFIX}close\` - Close current ticket\n\`${PREFIX}setup-tickets #category @role\` - Setup ticket system`, 
+                inline: false 
+            },
+            { 
+                name: '👋 Welcome System', 
+                value: `\`${PREFIX}setup-welcome #channel\` - Setup welcome messages`, 
+                inline: false 
+            },
+            { 
+                name: '🔧 Moderation', 
+                value: `\`${PREFIX}kick @user [reason]\` - Kick a user\n\`${PREFIX}ban @user [reason]\` - Ban a user\n\`${PREFIX}purge <amount>\` - Delete messages`, 
+                inline: false 
+            },
+            { 
+                name: '📊 Utility', 
+                value: `\`${PREFIX}userinfo [@user]\` - User information\n\`${PREFIX}serverinfo\` - Server information\n\`${PREFIX}ping\` - Bot latency`, 
+                inline: false 
+            }
+        )
+        .setFooter({ text: 'Use the commands without <> or []' })
+        .setTimestamp();
+
+    await message.reply({ embeds: [embed] });
+}
+
+// Ping command
+async function handlePing(message) {
+    const sent = await message.reply('🏓 Pinging...');
+    const latency = sent.createdTimestamp - message.createdTimestamp;
+    
+    const embed = new EmbedBuilder()
+        .setTitle('🏓 Pong!')
+        .setColor('#0099ff')
+        .addFields(
+            { name: 'Latency', value: `${latency}ms`, inline: true },
+            { name: 'API Latency', value: `${Math.round(client.ws.ping)}ms`, inline: true }
+        )
+        .setTimestamp();
+
+    await sent.edit({ content: '', embeds: [embed] });
+}
+
 // Ticket system functions
-async function handleTicketCreate(interaction) {
-    const settings = serverSettings.get(interaction.guild.id);
+async function handleTicketCreate(message) {
+    const settings = serverSettings.get(message.guild.id);
     if (!settings || !settings.ticketCategory) {
-        return interaction.reply({
-            content: 'Ticket system is not set up. Use `/setup-tickets` first.',
-            ephemeral: true
-        });
+        return message.reply('❌ Ticket system is not set up. Use `+setup-tickets #category @role` first.');
     }
 
     const ticketNumber = Math.floor(Math.random() * 9000) + 1000;
     const channelName = `ticket-${ticketNumber}`;
 
     try {
-        const ticketChannel = await interaction.guild.channels.create({
+        const ticketChannel = await message.guild.channels.create({
             name: channelName,
             type: ChannelType.GuildText,
             parent: settings.ticketCategory,
             permissionOverwrites: [
                 {
-                    id: interaction.guild.id,
+                    id: message.guild.id,
                     deny: [PermissionFlagsBits.ViewChannel]
                 },
                 {
-                    id: interaction.user.id,
+                    id: message.author.id,
                     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
                 },
                 {
@@ -243,7 +210,7 @@ async function handleTicketCreate(interaction) {
         });
 
         ticketData.set(ticketChannel.id, {
-            creator: interaction.user.id,
+            creator: message.author.id,
             createdAt: new Date(),
             ticketNumber
         });
@@ -253,7 +220,7 @@ async function handleTicketCreate(interaction) {
             .setDescription('Support team will be with you shortly!')
             .setColor('#0099ff')
             .addFields(
-                { name: 'Created by', value: `${interaction.user}`, inline: true },
+                { name: 'Created by', value: `${message.author}`, inline: true },
                 { name: 'Status', value: '🟢 Open', inline: true }
             )
             .setTimestamp();
@@ -268,32 +235,23 @@ async function handleTicketCreate(interaction) {
             );
 
         await ticketChannel.send({
-            content: `${interaction.user} <@&${settings.supportRole}>`,
+            content: `${message.author} <@&${settings.supportRole}>`,
             embeds: [embed],
             components: [closeButton]
         });
 
-        await interaction.reply({
-            content: `Ticket created! ${ticketChannel}`,
-            ephemeral: true
-        });
+        await message.reply(`✅ Ticket created! ${ticketChannel}`);
 
     } catch (error) {
         console.error('Ticket creation error:', error);
-        await interaction.reply({
-            content: 'Failed to create ticket. Please try again.',
-            ephemeral: true
-        });
+        await message.reply('❌ Failed to create ticket. Please try again.');
     }
 }
 
-async function handleTicketClose(interaction) {
-    const ticket = ticketData.get(interaction.channel.id);
+async function handleTicketClose(message) {
+    const ticket = ticketData.get(message.channel.id);
     if (!ticket) {
-        return interaction.reply({
-            content: 'This is not a ticket channel.',
-            ephemeral: true
-        });
+        return message.reply('❌ This is not a ticket channel.');
     }
 
     const embed = new EmbedBuilder()
@@ -302,12 +260,12 @@ async function handleTicketClose(interaction) {
         .setColor('#ff0000')
         .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await message.reply({ embeds: [embed] });
 
     setTimeout(async () => {
         try {
-            ticketData.delete(interaction.channel.id);
-            await interaction.channel.delete();
+            ticketData.delete(message.channel.id);
+            await message.channel.delete();
         } catch (error) {
             console.error('Error deleting ticket:', error);
         }
@@ -319,63 +277,114 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
     if (interaction.customId === 'close_ticket') {
-        await handleTicketClose(interaction);
+        const ticket = ticketData.get(interaction.channel.id);
+        if (!ticket) {
+            return interaction.reply({
+                content: '❌ This is not a ticket channel.',
+                ephemeral: true
+            });
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle('🔒 Ticket Closing')
+            .setDescription('This ticket will be deleted in 10 seconds...')
+            .setColor('#ff0000')
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
+
+        setTimeout(async () => {
+            try {
+                ticketData.delete(interaction.channel.id);
+                await interaction.channel.delete();
+            } catch (error) {
+                console.error('Error deleting ticket:', error);
+            }
+        }, 10000);
     }
 });
 
 // Setup functions
-async function handleWelcomeSetup(interaction) {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({
-            content: 'You need Administrator permissions to use this command.',
-            ephemeral: true
-        });
+async function handleWelcomeSetup(message, args) {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return message.reply('❌ You need Administrator permissions to use this command.');
     }
 
-    const channel = interaction.options.getChannel('channel');
+    const channelMention = args[0];
+    if (!channelMention) {
+        return message.reply(`❌ Please mention a channel: \`${PREFIX}setup-welcome #welcome\``);
+    }
+
+    const channelId = channelMention.replace(/[<#>]/g, '');
+    const channel = message.guild.channels.cache.get(channelId);
     
-    if (!serverSettings.has(interaction.guild.id)) {
-        serverSettings.set(interaction.guild.id, {});
+    if (!channel) {
+        return message.reply('❌ Invalid channel. Please mention a valid channel.');
+    }
+
+    if (!serverSettings.has(message.guild.id)) {
+        serverSettings.set(message.guild.id, {});
     }
     
-    const settings = serverSettings.get(interaction.guild.id);
+    const settings = serverSettings.get(message.guild.id);
     settings.welcomeChannel = channel.id;
     
-    await interaction.reply({
-        content: `✅ Welcome system set up! New members will be welcomed in ${channel}`,
-        ephemeral: true
-    });
+    await message.reply(`✅ Welcome system set up! New members will be welcomed in ${channel}`);
 }
 
-async function handleTicketSetup(interaction) {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({
-            content: 'You need Administrator permissions to use this command.',
-            ephemeral: true
-        });
+async function handleTicketSetup(message, args) {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return message.reply('❌ You need Administrator permissions to use this command.');
     }
 
-    const category = interaction.options.getChannel('category');
-    const supportRole = interaction.options.getRole('support-role');
-    
-    if (!serverSettings.has(interaction.guild.id)) {
-        serverSettings.set(interaction.guild.id, {});
+    if (args.length < 2) {
+        return message.reply(`❌ Usage: \`${PREFIX}setup-tickets #category @support-role\``);
+    }
+
+    const categoryMention = args[0];
+    const roleMention = args[1];
+
+    const categoryId = categoryMention.replace(/[<#>]/g, '');
+    const roleId = roleMention.replace(/[<@&>]/g, '');
+
+    const category = message.guild.channels.cache.get(categoryId);
+    const role = message.guild.roles.cache.get(roleId);
+
+    if (!category) {
+        return message.reply('❌ Invalid category. Please mention a valid category.');
+    }
+
+    if (!role) {
+        return message.reply('❌ Invalid role. Please mention a valid role.');
+    }
+
+    if (!serverSettings.has(message.guild.id)) {
+        serverSettings.set(message.guild.id, {});
     }
     
-    const settings = serverSettings.get(interaction.guild.id);
+    const settings = serverSettings.get(message.guild.id);
     settings.ticketCategory = category.id;
-    settings.supportRole = supportRole.id;
+    settings.supportRole = role.id;
     
-    await interaction.reply({
-        content: `✅ Ticket system set up!\nCategory: ${category}\nSupport Role: ${supportRole}`,
-        ephemeral: true
-    });
+    await message.reply(`✅ Ticket system set up!\nCategory: ${category}\nSupport Role: ${role}`);
 }
 
 // Utility commands
-async function handleUserInfo(interaction) {
-    const user = interaction.options.getUser('user') || interaction.user;
-    const member = interaction.guild.members.cache.get(user.id);
+async function handleUserInfo(message, args) {
+    let user;
+    
+    if (args[0]) {
+        const userId = args[0].replace(/[<@!>]/g, '');
+        user = await client.users.fetch(userId).catch(() => null);
+    } else {
+        user = message.author;
+    }
+
+    if (!user) {
+        return message.reply('❌ User not found.');
+    }
+
+    const member = message.guild.members.cache.get(user.id);
 
     const embed = new EmbedBuilder()
         .setTitle(`👤 ${user.tag}`)
@@ -388,11 +397,11 @@ async function handleUserInfo(interaction) {
         )
         .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await message.reply({ embeds: [embed] });
 }
 
-async function handleServerInfo(interaction) {
-    const guild = interaction.guild;
+async function handleServerInfo(message) {
+    const guild = message.guild;
     
     const embed = new EmbedBuilder()
         .setTitle(`🏰 ${guild.name}`)
@@ -408,104 +417,87 @@ async function handleServerInfo(interaction) {
         )
         .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await message.reply({ embeds: [embed] });
 }
 
 // Moderation commands
-async function handleKick(interaction) {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.KickMembers)) {
-        return interaction.reply({
-            content: 'You need Kick Members permission to use this command.',
-            ephemeral: true
-        });
+async function handleKick(message, args) {
+    if (!message.member.permissions.has(PermissionFlagsBits.KickMembers)) {
+        return message.reply('❌ You need Kick Members permission to use this command.');
     }
 
-    const user = interaction.options.getUser('user');
-    const reason = interaction.options.getString('reason') || 'No reason provided';
-    const member = interaction.guild.members.cache.get(user.id);
+    if (!args[0]) {
+        return message.reply(`❌ Usage: \`${PREFIX}kick @user [reason]\``);
+    }
+
+    const userId = args[0].replace(/[<@!>]/g, '');
+    const reason = args.slice(1).join(' ') || 'No reason provided';
+    const member = message.guild.members.cache.get(userId);
 
     if (!member) {
-        return interaction.reply({
-            content: 'User not found in this server.',
-            ephemeral: true
-        });
+        return message.reply('❌ User not found in this server.');
     }
 
     if (!member.kickable) {
-        return interaction.reply({
-            content: 'Cannot kick this user.',
-            ephemeral: true
-        });
+        return message.reply('❌ Cannot kick this user.');
     }
 
     try {
         await member.kick(reason);
-        await interaction.reply({
-            content: `✅ Kicked ${user.tag} for: ${reason}`,
-            ephemeral: true
-        });
+        await message.reply(`✅ Kicked ${member.user.tag} for: ${reason}`);
     } catch (error) {
-        await interaction.reply({
-            content: 'Failed to kick user.',
-            ephemeral: true
-        });
+        await message.reply('❌ Failed to kick user.');
     }
 }
 
-async function handleBan(interaction) {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.BanMembers)) {
-        return interaction.reply({
-            content: 'You need Ban Members permission to use this command.',
-            ephemeral: true
-        });
+async function handleBan(message, args) {
+    if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
+        return message.reply('❌ You need Ban Members permission to use this command.');
     }
 
-    const user = interaction.options.getUser('user');
-    const reason = interaction.options.getString('reason') || 'No reason provided';
-    const member = interaction.guild.members.cache.get(user.id);
+    if (!args[0]) {
+        return message.reply(`❌ Usage: \`${PREFIX}ban @user [reason]\``);
+    }
+
+    const userId = args[0].replace(/[<@!>]/g, '');
+    const reason = args.slice(1).join(' ') || 'No reason provided';
+    const member = message.guild.members.cache.get(userId);
 
     if (member && !member.bannable) {
-        return interaction.reply({
-            content: 'Cannot ban this user.',
-            ephemeral: true
-        });
+        return message.reply('❌ Cannot ban this user.');
     }
 
     try {
-        await interaction.guild.bans.create(user.id, { reason });
-        await interaction.reply({
-            content: `✅ Banned ${user.tag} for: ${reason}`,
-            ephemeral: true
-        });
+        await message.guild.bans.create(userId, { reason });
+        const user = await client.users.fetch(userId);
+        await message.reply(`✅ Banned ${user.tag} for: ${reason}`);
     } catch (error) {
-        await interaction.reply({
-            content: 'Failed to ban user.',
-            ephemeral: true
-        });
+        await message.reply('❌ Failed to ban user.');
     }
 }
 
-async function handlePurge(interaction) {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-        return interaction.reply({
-            content: 'You need Manage Messages permission to use this command.',
-            ephemeral: true
-        });
+async function handlePurge(message, args) {
+    if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+        return message.reply('❌ You need Manage Messages permission to use this command.');
     }
 
-    const amount = interaction.options.getInteger('amount');
+    const amount = parseInt(args[0]);
+    
+    if (!amount || amount < 1 || amount > 100) {
+        return message.reply(`❌ Usage: \`${PREFIX}purge <1-100>\``);
+    }
 
     try {
-        const messages = await interaction.channel.bulkDelete(amount, true);
-        await interaction.reply({
-            content: `✅ Deleted ${messages.size} messages.`,
-            ephemeral: true
-        });
+        const messages = await message.channel.bulkDelete(amount + 1, true);
+        const reply = await message.channel.send(`✅ Deleted ${messages.size - 1} messages.`);
+        
+        // Delete confirmation message after 5 seconds
+        setTimeout(() => {
+            reply.delete().catch(() => {});
+        }, 5000);
+        
     } catch (error) {
-        await interaction.reply({
-            content: 'Failed to delete messages.',
-            ephemeral: true
-        });
+        await message.reply('❌ Failed to delete messages.');
     }
 }
 
