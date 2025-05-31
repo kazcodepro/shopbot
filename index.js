@@ -174,7 +174,7 @@ async function handleHelp(message) {
         .addFields(
             { 
                 name: '🎫 Ticket System', 
-                value: `\`${PREFIX}ticket\` - Create a support ticket\n\`${PREFIX}ticket-panel\` - Create ticket panel with button\n\`${PREFIX}close\` - Close current ticket\n\`${PREFIX}setup-tickets #category @role\` - Setup ticket system`, 
+                value: `\`${PREFIX}ticket\` - Create a support ticket\n\`${PREFIX}ticket-panel\` - Create ticket panel with button\n\`${PREFIX}close\` - Close current ticket\n\`${PREFIX}setup-tickets <category-id> @role\` - Setup ticket system`, 
                 inline: false 
             },
             { 
@@ -426,13 +426,14 @@ async function handleTicketSetup(message, args) {
     }
 
     if (args.length < 2) {
-        return message.reply(`❌ Usage: \`${PREFIX}setup-tickets #category @support-role\``);
+        return message.reply(`❌ Usage: \`${PREFIX}setup-tickets <category-id> @support-role\`\n\n**How to get Category ID:**\n1. Enable Developer Mode in Discord Settings\n2. Right-click the category\n3. Select "Copy ID"\n4. Use that ID in the command`);
     }
 
-    const categoryMention = args[0];
+    const categoryInput = args[0];
     const roleMention = args[1];
 
-    const categoryId = categoryMention.replace(/[<#>]/g, '');
+    // Handle both ID and potential mention formats
+    const categoryId = categoryInput.replace(/[<#>]/g, '');
     const roleId = roleMention.replace(/[<@&>]/g, '');
 
     const category = message.guild.channels.cache.get(categoryId);
@@ -440,6 +441,11 @@ async function handleTicketSetup(message, args) {
 
     if (!category) {
         return message.reply('❌ Invalid category. Please mention a valid category.');
+    }
+
+    // Check if it's actually a category channel
+    if (category.type !== ChannelType.GuildCategory) {
+        return message.reply(`❌ ${category} is not a category. Please mention a category (folder), not a regular channel.\n\n**How to create a category:**\n1. Right-click in your server's channel list\n2. Select "Create Category"\n3. Name it (e.g., "Support Tickets")\n4. Then use that category in this command`);
     }
 
     if (!role) {
